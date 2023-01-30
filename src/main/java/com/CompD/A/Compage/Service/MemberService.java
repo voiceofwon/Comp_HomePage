@@ -2,6 +2,7 @@ package com.CompD.A.Compage.Service;
 
 import com.CompD.A.Compage.DTO.MemberJoinRequestDto;
 import com.CompD.A.Compage.DTO.MemberLoginRequestDto;
+import com.CompD.A.Compage.DTO.RegenerateTokenDTO;
 import com.CompD.A.Compage.DTO.TokenInfo;
 import com.CompD.A.Compage.Entity.Member;
 import com.CompD.A.Compage.JWT.JwtTokenProvider;
@@ -9,11 +10,15 @@ import com.CompD.A.Compage.Repository.MemberRepositroy;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @Transactional
@@ -26,6 +31,8 @@ public class MemberService{
     private final JwtTokenProvider jwtTokenProvider;
 
     private final PasswordEncoder passwordEncoder;
+
+    private final RedisTemplate<String, Object> redisTemplate;
 
     @Transactional
     public TokenInfo login(String memberId, String password){
@@ -41,11 +48,35 @@ public class MemberService{
         // 3. 인증 정보를 기반으로 JWT 토큰 생성
         TokenInfo tokenInfo = jwtTokenProvider.generateToken(authentication);
 
-        //Redis에 업로드 (미완성)
-        String accessToken = tokenInfo.getAccessToken();
-        String refreshToken = tokenInfo.getRefreshToken();
+        redisTemplate.opsForValue()
+                .set("RefreshToken"+ authentication.getName(), tokenInfo.getRefreshToken(),
+                        86400000, TimeUnit.MILLISECONDS);
+
+
+
 
         return tokenInfo;
+    }
+
+    public TokenInfo regenerateToken(RegenerateTokenDTO regenerateTokenDTO) throws Exception{
+        String  refreshToken = regenerateTokenDTO.getRefreshToken();
+
+        if(!jwtTokenProvider.validateToken(refreshToken)){
+            throw new Exception("Invalid refresh Token");
+        }
+
+        Authentication authentication = jwtTokenProvider.getAuthentication(refreshToken);
+
+        String savedToken = redisTemplate.opsForValue().get("RefreshToken"+ authentication.getName()).toString();
+        if(!refreshToken.equals(savedToken)){
+            throw new Exception("Refresh Token doesn't match");
+        }
+
+        TokenInfo newToken = jwtTokenProvider.generateToken(authentication);
+        redisTemplate.opsForValue().set(authentication.getName(), newToken.getRefreshToken()
+                ,86400000,TimeUnit.MILLISECONDS);
+
+        return newToken;
     }
 
     public Long UserJoin (MemberJoinRequestDto memberJoinRequestDto) throws Exception{
@@ -62,5 +93,29 @@ public class MemberService{
         member.encodePassword(passwordEncoder);
 
         return member.getId();
+    }
+
+    public Boolean memberDelete(String memberId) throws Exception{
+        if(memberRepositroy.existsByMemberId(memberId)){
+            memberRepositroy.deleteByMemberId(memberId);
+            return true;
+        }
+        else{
+            return false;
+        }
+    }
+
+    public List<Member> memberSearch(String memberId) throws Exception{
+        List<Member> searchList = memberRepositroy.findByMemberIdContains(memberId);
+        if(!searchList.isEmpty()){
+            return searchList;
+        }
+        else{
+            throw new Exception("검색된 회원이 없습니다.");
+        }
+    }
+
+    public int membercount(String memberId){
+        return memberRepositroy.findByMemberIdContains(memberId).size();
     }
 }

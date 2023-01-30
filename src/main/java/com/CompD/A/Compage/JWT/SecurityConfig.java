@@ -27,7 +27,7 @@ public class SecurityConfig {
                 .and().authorizeHttpRequests()
                 .requestMatchers("/login").permitAll()
                 .requestMatchers("/login/**").permitAll()
-                .requestMatchers("/Sos/**").permitAll()
+                .requestMatchers("/Sos/**").hasRole("USER")
                 .anyRequest().authenticated()
                 .and()
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter.class);
