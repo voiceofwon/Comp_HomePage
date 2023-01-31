@@ -35,11 +35,17 @@ public class MemberService{
     private final RedisTemplate<String, Object> redisTemplate;
 
     @Transactional
-    public TokenInfo login(String memberId, String password){
+    public TokenInfo login(MemberLoginRequestDto memberLoginRequestDto){
+
+        Member member = memberRepositroy.findByMemberId(memberLoginRequestDto.getMemberId())
+                .orElseThrow(()->new IllegalArgumentException("가입되지 않은 사용자입니다."));
+        if(!memberLoginRequestDto.getPassword().equals(member.getPassword())){
+            throw new IllegalArgumentException("잘못된 비밀번호입니다.");
+        }
+
         // 1. Login ID/PW 를 기반으로 Authentication 객체 생성
         // 이때 authentication 는 인증 여부를 확인하는 authenticated 값이 false
-
-        UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(memberId, password);
+        UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(memberLoginRequestDto.getMemberId(), memberLoginRequestDto.getPassword());
 
         // 2. 실제 검증 (사용자 비밀번호 체크)이 이루어지는 부분
         // authenticate 매서드가 실행될 때 CustomUserDetailsService 에서 만든 loadUserByUsername 메서드가 실행
@@ -56,6 +62,23 @@ public class MemberService{
 
 
         return tokenInfo;
+    }
+
+    @Transactional
+    public void logout(TokenInfo tokenInfo){
+        if(!jwtTokenProvider.validateToken(tokenInfo.getAccessToken())){
+            throw new IllegalArgumentException("로그아웃 : 유효하지 않은 토큰입니다.");
+
+
+        }
+        Authentication authentication = jwtTokenProvider.getAuthentication(tokenInfo.getAccessToken());
+
+        if(redisTemplate.opsForValue().get("RefreshToken"+authentication.getName())!=null){
+            redisTemplate.delete("RefreshToken" + authentication.getName());
+        }
+
+        //accessToken을 블랙리스트에 추가
+        redisTemplate.opsForValue().set(tokenInfo.getAccessToken(),"logout",86400000,TimeUnit.MILLISECONDS);
     }
 
     public TokenInfo regenerateToken(RegenerateTokenDTO regenerateTokenDTO) throws Exception{
